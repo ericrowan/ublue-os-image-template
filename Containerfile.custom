@@ -1,0 +1,60 @@
+# Base Image
+FROM ghcr.io/ublue-os/bluefin-dx:41
+
+# --- Install RPM Fusion Repositories ---
+RUN rpm-ostree install --apply-live \
+    https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+    https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+
+# --- Install build dependencies ---
+RUN rpm-ostree install --apply-live \
+    gcc make dkms kernel-headers kernel-devel # Development tools
+    elfutils-libelf-devel # Parallels Tools dependency
+
+# --- Copy Parallels Tools Kernel modules ---
+COPY parallels-tools /parallels-tools
+
+# --- Kernel Customization for Parallels Tools ---
+# 1. Install kernel source and build tools
+RUN rpm-ostree install --apply-live kernel-modules-core kernel-srpm-base fedpkg fedora-packager rpmdevtools
+
+# 2. Prepare the kernel source
+RUN rpm -i /usr/src/kernels/$(uname -r)/kernel-srpm-base-$(uname -r).src.rpm && \
+    rpmbuild -bp /root/rpmbuild/SPECS/kernel.spec && \
+    mkdir -p /kernel-build && \
+    cp -a /root/rpmbuild/BUILD/kernel-6.8.9-300.fc40/linux-6.8.9-300.fc40.aarch64/* /kernel-build && \
+    rm -rf /root/rpmbuild && rm -rf /usr/src/kernels/$(uname -r)
+
+# 3. Copy Parallels Tools kernel modules to kernel source tree
+RUN cp /parallels-tools/prl_tg/prl_tg.ko /kernel-build/drivers/gpu/drm/ && \
+    cp /parallels-tools/prl_x11/prl_x11.ko /kernel-build/drivers/gpu/drm/ && \
+    cp /parallels-tools/Kbuild /kernel-build/drivers/gpu/drm/
+
+# 4. Configure and build the kernel
+WORKDIR /kernel-build
+
+RUN make olddefconfig && \
+    make
+
+# 5. Install the kernel and modules
+RUN make modules_install && \
+    make install
+
+# --- End Kernel Customization ---
+
+# Layer essential packages
+RUN rpm-ostree install --apply-live \
+    hyprland hyprland-protocols xdg-desktop-portal-hyprland \ # Hyprland and dependencies
+    # Add other packages you need here
+
+# --- Install VS Code (if not in base image) ---
+# RUN rpm-ostree install --apply-live code # Or the appropriate package name
+
+# --- Install Firefox (if not in base image) ---
+# RUN rpm-ostree install --apply-live firefox # Or the appropriate package name
+
+# --- Configure Hyprland (if necessary) ---
+# Add any Hyprland configuration steps here
+
+# --- Any Other Customizations ---
+# Add any other customizations you need
