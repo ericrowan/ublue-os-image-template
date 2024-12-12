@@ -1,59 +1,71 @@
-## 1. BUILD ARGS
-# These allow changing the produced image by passing different build args to adjust
-# the source from which your image is built.
-# Build args can be provided on the commandline when building locally with:
-#   podman build -f Containerfile --build-arg FEDORA_VERSION=40 -t local-image
+# Base Image
+FROM ghcr.io/ublue-os/bluefin-dx:41
 
-# SOURCE_IMAGE arg can be anything from ublue upstream which matches your desired version:
-# See list here: https://github.com/orgs/ublue-os/packages?repo_name=main
-# - "silverblue"
-# - "kinoite"
-# - "sericea"
-# - "onyx"
-# - "lazurite"
-# - "vauxite"
-# - "base"
-#
-#  "aurora", "bazzite", "bluefin" or "ucore" may also be used but have different suffixes.
-ARG SOURCE_IMAGE="silverblue"
+# --- Install RPM Fusion Repositories ---
+RUN rpm-ostree install --apply-live \
+    https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+    https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
 
-## SOURCE_SUFFIX arg should include a hyphen and the appropriate suffix name
-# These examples all work for silverblue/kinoite/sericea/onyx/lazurite/vauxite/base
-# - "-main"
-# - "-nvidia"
-# - "-asus"
-# - "-asus-nvidia"
-# - "-surface"
-# - "-surface-nvidia"
-#
-# aurora, bazzite and bluefin each have unique suffixes. Please check the specific image.
-# ucore has the following possible suffixes
-# - stable
-# - stable-nvidia
-# - stable-zfs
-# - stable-nvidia-zfs
-# - (and the above with testing rather than stable)
-ARG SOURCE_SUFFIX="-main"
+# --- Install build dependencies ---
+RUN rpm-ostree install --apply-live \
+    gcc make dkms kernel-headers kernel-devel # Development tools
+    elfutils-libelf-devel # Parallels Tools dependency
 
-## SOURCE_TAG arg must be a version built for the specific image: eg, 39, 40, gts, latest
-ARG SOURCE_TAG="latest"
+# --- Copy Parallels Tools Kernel modules ---
+COPY parallels-tools /parallels-tools
 
+# --- Kernel Customization for Parallels Tools ---
+# 1. Install kernel source and build tools
+RUN rpm-ostree install --apply-live kernel-modules-core kernel-srpm-base fedpkg fedora-packager rpmdevtools
 
-### 2. SOURCE IMAGE
-## this is a standard Containerfile FROM using the build ARGs above to select the right upstream image
-FROM ghcr.io/ublue-os/${SOURCE_IMAGE}${SOURCE_SUFFIX}:${SOURCE_TAG}
+# 2. Prepare the kernel source
+RUN rpm -i /usr/src/kernels/$(uname -r)/kernel-srpm-base-$(uname -r).src.rpm && \
+    rpmbuild -bp /root/rpmbuild/SPECS/kernel.spec && \
+    mkdir -p /kernel-build && \
+    cp -a /root/rpmbuild/BUILD/kernel-6.8.9-300.fc40/linux-6.8.9-300.fc40.aarch64/* /kernel-build && \
+    rm -rf /root/rpmbuild && rm -rf /usr/src/kernels/$(uname -r)
 
+# 3. Copy Parallels Tools kernel modules to kernel source tree
+COPY parallels-tools/prl_tg /kernel-build/drivers/gpu/drm/prl_tg
+COPY parallels-tools/prl_x11 /kernel-build/drivers/gpu/drm/prl_x11
 
-### 3. MODIFICATIONS
-## make modifications desired in your image and install packages by modifying the build.sh script
-## the following RUN directive does all the things required to run "build.sh" as recommended.
+# 4. Configure and build the kernel
+WORKDIR /kernel-build
 
-COPY build.sh /tmp/build.sh
+RUN make olddefconfig && \
+    make
 
-RUN mkdir -p /var/lib/alternatives && \
-    /tmp/build.sh && \
-    ostree container commit
-## NOTES:
-# - /var/lib/alternatives is required to prevent failure with some RPM installs
-# - All RUN commands must end with ostree container commit
-#   see: https://coreos.github.io/rpm-ostree/container/#using-ostree-container-commit
+# 5. Install the kernel and modules
+RUN make modules_install && \
+    make install
+
+# 6. Build and install Parallels Tools kernel modules
+WORKDIR /parallels-tools
+
+RUN tar -xvzf prl_mod.tar.gz && \
+    make -C prl_tg/Toolgate/Guest/Linux/prl_tg && \
+    make -C prl_x11 && \
+    mkdir -p /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_tg && \
+    mkdir -p /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_x11 && \
+    cp prl_tg/Toolgate/Guest/Linux/prl_tg/prl_tg.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_tg/ && \
+    cp prl_x11/prl_x11.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_x11/ && \
+    depmod -a
+
+# --- End Kernel Customization ---
+
+# Layer essential packages
+RUN rpm-ostree install --apply-live \
+    hyprland hyprland-protocols xdg-desktop-portal-hyprland \ # Hyprland and dependencies
+    # Add other packages you need here
+
+# --- Install VS Code (if not in base image) ---
+# RUN rpm-ostree install --apply-live code # Or the appropriate package name
+
+# --- Install Firefox (if not in base image) ---
+# RUN rpm-ostree install --apply-live firefox # Or the appropriate package name
+
+# --- Configure Hyprland (if necessary) ---
+# Add any Hyprland configuration steps here
+
+# --- Any Other Customizations ---
+# Add any other customizations you need
