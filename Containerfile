@@ -10,47 +10,24 @@ RUN rpm-ostree install --apply-live \
 RUN rpm-ostree install --apply-live \
     gcc make dkms kernel-headers kernel-devel elfutils-libelf-devel # Development tools and Parallels Tools dependency
 
-# --- Copy Parallels Tools Kernel modules ---
+# --- Copy Parallels Tools kmods folder ---
 COPY parallels-tools /parallels-tools
 
-# --- Kernel Customization for Parallels Tools ---
-# 1. Install kernel source and build tools
-RUN rpm-ostree install --apply-live kernel-modules-core kernel-srpm-base fedpkg fedora-packager rpmdevtools
+# --- Install Parallels Tools ---
+# Install dependencies for Parallels Tools
+RUN rpm-ostree install --apply-live \
+    xorg-x11-drv-fbdev \
+    xorg-x11-drv-vesa
 
-# 2. Prepare the kernel source
-RUN rpm -i /usr/src/kernels/$(uname -r)/kernel-srpm-base-$(uname -r).src.rpm && \
-    rpmbuild -bp /root/rpmbuild/SPECS/kernel.spec && \
-    mkdir -p /kernel-build && \
-    cp -a /root/rpmbuild/BUILD/kernel-6.8.9-300.fc40/linux-6.8.9-300.fc40.aarch64/* /kernel-build && \
-    rm -rf /root/rpmbuild && rm -rf /usr/src/kernels/$(uname -r)
+# Prepare /tmp/kmods folder
+RUN mkdir -p /tmp/kmods && \
+    cd /tmp/kmods && \
+    tar -xvzf /parallels-tools/prl_mod.tar.gz
 
-# 3. Copy Parallels Tools kernel modules to kernel source tree
-COPY parallels-tools/prl_tg /kernel-build/drivers/gpu/drm/prl_tg
-COPY parallels-tools/prl_x11 /kernel-build/drivers/gpu/drm/prl_x11
+# Run the installer script and point to the /tmp/kmods folder
+RUN /parallels-tools/install --install-component desktop --kmods-dir /tmp/kmods
 
-# 4. Configure and build the kernel
-WORKDIR /kernel-build
-
-RUN make olddefconfig && \
-    make
-
-# 5. Install the kernel and modules
-RUN make modules_install && \
-    make install
-
-# 6. Build and install Parallels Tools kernel modules
-WORKDIR /parallels-tools
-
-RUN tar -xvzf prl_mod.tar.gz && \
-    make -C prl_tg/Toolgate/Guest/Linux/prl_tg && \
-    make -C prl_x11 && \
-    mkdir -p /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_tg && \
-    mkdir -p /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_x11 && \
-    cp prl_tg/Toolgate/Guest/Linux/prl_tg/prl_tg.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_tg/ && \
-    cp prl_x11/prl_x11.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_x11/ && \
-    depmod -a
-
-# --- End Kernel Customization ---
+# --- End Parallels Tools Installation ---
 
 # Layer essential packages
 RUN rpm-ostree install --apply-live \
