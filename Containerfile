@@ -8,7 +8,7 @@ RUN rpm-ostree install --apply-live \
 
 # --- Install build dependencies ---
 RUN rpm-ostree install --apply-live \
-    gcc make dkms kernel-headers kernel-devel # Development tools
+    gcc make dkms kernel-headers kernel-devel \ # Development tools
     elfutils-libelf-devel # Parallels Tools dependency
 
 # --- Copy Parallels Tools Kernel modules ---
