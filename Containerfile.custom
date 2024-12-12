@@ -26,9 +26,8 @@ RUN rpm -i /usr/src/kernels/$(uname -r)/kernel-srpm-base-$(uname -r).src.rpm && 
     rm -rf /root/rpmbuild && rm -rf /usr/src/kernels/$(uname -r)
 
 # 3. Copy Parallels Tools kernel modules to kernel source tree
-RUN cp /parallels-tools/prl_tg/prl_tg.ko /kernel-build/drivers/gpu/drm/ && \
-    cp /parallels-tools/prl_x11/prl_x11.ko /kernel-build/drivers/gpu/drm/ && \
-    cp /parallels-tools/Kbuild /kernel-build/drivers/gpu/drm/
+COPY parallels-tools/prl_tg /kernel-build/drivers/gpu/drm/prl_tg
+COPY parallels-tools/prl_x11 /kernel-build/drivers/gpu/drm/prl_x11
 
 # 4. Configure and build the kernel
 WORKDIR /kernel-build
@@ -39,6 +38,18 @@ RUN make olddefconfig && \
 # 5. Install the kernel and modules
 RUN make modules_install && \
     make install
+
+# 6. Build and install Parallels Tools kernel modules
+WORKDIR /parallels-tools
+
+RUN tar -xvzf prl_mod.tar.gz && \
+    make -C prl_tg/Toolgate/Guest/Linux/prl_tg && \
+    make -C prl_x11 && \
+    mkdir -p /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_tg && \
+    mkdir -p /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_x11 && \
+    cp prl_tg/Toolgate/Guest/Linux/prl_tg/prl_tg.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_tg/ && \
+    cp prl_x11/prl_x11.ko /lib/modules/$(uname -r)/kernel/drivers/gpu/drm/prl_x11/ && \
+    depmod -a
 
 # --- End Kernel Customization ---
 
